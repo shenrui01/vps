@@ -78,8 +78,7 @@ daemon'
 
 echo "$opvpn" > /etc/openvpn/openvpn.conf
 
-echo 1 > /proc/sys/net/ipv4/ip_forward
-iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o venet0 -j MASQUERADE
+iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o eth0 -j MASQUERADE
 iptables-save > /etc/sysconfig/iptables
 sed -i 's/eth0/venet0/g' /etc/sysconfig/iptables # dirty vz fix for iptables-save
 echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
