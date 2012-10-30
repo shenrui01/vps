@@ -14,7 +14,6 @@ printf "
 ####################################################
 "
 vpsip=`hostname -i`
- 
 iprange="10.0.99"
 echo "Please input L2TP IP-Range:"
 read -p "(Default Range: 10.0.99):" iprange
