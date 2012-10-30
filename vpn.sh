@@ -1,40 +1,27 @@
 #!/bin/bash
- 
-if [ $(id -u) != "0" ]; then
-    printf "Error: You must be root to run this tool!\n"
-    exit 1
-fi
 clear
-printf "
-####################################################
-#                                                  #
-# This is a Shell-Based tool of l2tp&pptp install  #
-# Website: http://rsis.me                          #
-# Based on zeddicus.com's l2tp script              #
-####################################################
-"
-vpsip=`hostname -i`
-iprange="10.0.99"
-echo "Please input L2TP IP-Range:"
-read -p "(Default Range: 10.0.99):" iprange
-if [ "$iprange" = "" ]; then
-    iprange="10.0.99"
+if [ $(id -u) != "0" ]; then
+    printf "Error: You must be root to run this tool!\n"
+    exit 1
 fi
- 
-pprange="172.16.32"
-echo "Please input PPTP IP-Range:"
-read -p "(Default Range: 172.16.32):" pprange
-if [ "$pprange" = "" ]; then
-    pprange="172.16.32"
+
+host_ip=`ifconfig eth0 | awk '/inet addr/ {print $2}' | awk -F ':' '{print $2}'`
+cur_dir=`pwd`
+read -p "(Please input PSK: )" psk
+if [ "$psk" = "" ]; then
+        psk="rsis.me"
 fi
- 
-mypsk="harryxu"
-echo "Please input PSK:"
-read -p "(Default PSK: harryxu):" mypsk
-if [ "$mypsk" = "" ]; then
-    mypsk="harryxu"
+
+read -p "Enter vpn username: " username
+if [ "$username" = "" ];then
+        username="vpn"
 fi
- 
+
+read -p "Enter vpn password: " userpsw
+if [ "$userpsw" = "" ];then
+        userpsw="vpn"
+fi
+
 clear
 get_char()
 {
@@ -48,94 +35,117 @@ stty $SAVEDSTTY
 }
 echo ""
 echo "ServerIP:"
-echo "$vpsip"
-echo ""
-echo "Server Local IP:"
-echo "$iprange.1"
-echo ""
-echo "Client Remote IP Range:"
-echo "$iprange.2-$iprange.254"
+echo "$host_ip"
 echo ""
 echo "PSK:"
-echo "$mypsk"
+echo "$psk"
+echo ""
+echo "VPN Account:"
+echo "$username"
+echo ""
+echo "Account Password:"
+echo "$userpsw"
 echo ""
 echo "Press any key to start..."
 char=`get_char`
 clear
-mknod /dev/random c 1 9
+
 yum -y update
-yum -y upgrade
-yum install -y ppp iptables make gcc gmp-devel xmlto bison flex xmlto libpcap-devel lsof vim-enhanced
-mkdir /ztmp
-mkdir /ztmp/l2tp
-cd /ztmp/l2tp
-wget http://www.openswan.org/download/openswan-2.6.38.tar.gz
-tar zxvf openswan-*.tar.gz
-cd openswan-*
+yum remove  -y pptpd ppp
+yum install -y make gcc gmp-devel bison flex libpcap-devel ppp lsof perl iptables 
+yum install -y libpcap gcc-c++ logrotate tar cpio pam tcp_wrappers
+
+wget http://cloud.github.com/downloads/shenrui01/vps/dkms-2.0.17.5-1.noarch.rpm
+wget http://cloud.github.com/downloads/shenrui01/vps/kernel_ppp_mppe-1.0.2-3dkms.noarch.rpm
+wget http://cloud.github.com/downloads/shenrui01/vps/pptpd-1.3.4-1.rhel5.1.i386.rpm
+
+rpm -ivh dkms-2.0.17.5-1.noarch.rpm
+rpm -ivh kernel_ppp_mppe-1.0.2-3dkms.noarch.rpm
+rpm -qa kernel_ppp_mppe
+rpm -ivh pptpd-1.3.4-1.rhel5.1.i386.rpm
+
+
+wget http://cloud.github.com/downloads/shenrui01/vps/openswan-2.6.34.tar.gz
+tar zxvf openswan-2.6.34.tar.gz
+cd openswan-2.6.34/
 make programs install
-rm -rf /etc/ipsec.conf
-touch /etc/ipsec.conf
-cat >>/etc/ipsec.conf<<EOF
+cd ../
+
+cat > /etc/ipsec.conf <<EOF
+version 2.0
 config setup
-    nat_traversal=yes
-    virtual_private=%v4:10.0.0.0/8,%v4:192.168.0.0/16,%v4:172.16.0.0/12
-    oe=off
-    protostack=netkey
- 
+    nat_traversal=yes
+    virtual_private=%v4:10.0.0.0/8,%v4:192.168.0.0/16,%v4:172.16.0.0/12
+    oe=off
+    protostack=netkey
+
 conn L2TP-PSK-NAT
-    rightsubnet=vhost:%priv
-    also=L2TP-PSK-noNAT
- 
+    rightsubnet=vhost:%priv
+    also=L2TP-PSK-noNAT
+
 conn L2TP-PSK-noNAT
-    authby=secret
-    pfs=no
-    auto=add
-    keyingtries=3
-    rekey=no
-    ikelifetime=8h
-    keylife=1h
-    type=transport
-    left=$vpsip
-    leftprotoport=17/1701
-    right=%any
-    rightprotoport=17/%any
+    authby=secret
+    pfs=no
+    auto=add
+    keyingtries=3
+    rekey=no
+    ikelifetime=8h
+    keylife=1h
+    type=transport
+    left=$host_ip
+    leftprotoport=17/1701
+    right=%any
+    rightprotoport=17/%any
 EOF
-cat >>/etc/ipsec.secrets<<EOF
-$vpsip %any: PSK "$mypsk"
+
+cat > /etc/ipsec.secrets <<EOF
+$host_ip %any: PSK "$psk"
 EOF
-sed -i 's/net.ipv4.ip_forward = 0/net.ipv4.ip_forward = 1/g' /etc/sysctl.conf
-sysctl -p
-iptables --table nat --append POSTROUTING --jump MASQUERADE
+
 for each in /proc/sys/net/ipv4/conf/*
 do
 echo 0 > $each/accept_redirects
 echo 0 > $each/send_redirects
 done
+echo 1 > /proc/sys/net/core/xfrm_larval_drop
+iptables --table nat --append POSTROUTING -o eth0 --jump MASQUERADE 
+
+service iptables save
+service iptables restart
+chkconfig iptables on
+
+sed -i 's/net.ipv4.ip_forward = 0/net.ipv4.ip_forward = 1/g' /etc/sysctl.conf
+sysctl -p
+
 /etc/init.d/ipsec restart
 ipsec verify
-cd /ztmp/l2tp
-wget https://raw.github.com/shenrui01/vps/master/rp-l2tp-0.4.tar.gz
-tar zxvf rp-l2tp-*.tar.gz
-cd rp-l2tp-*
+
+cd $cur_dir
+wget http://cloud.github.com/downloads/shenrui01/vps/rp-l2tp-0.4.tar.gz
+tar zxvf rp-l2tp-0.4.tar.gz
+cd rp-l2tp-0.4
 ./configure
 make
 cp handlers/l2tp-control /usr/local/sbin/
 mkdir /var/run/xl2tpd/
 ln -s /usr/local/sbin/l2tp-control /var/run/xl2tpd/l2tp-control
-cd /ztmp/l2tp
-wget https://raw.github.com/shenrui01/vps/master/xl2tpd-1.2.4.tar.gz
-tar zxvf xl2tpd-1.2.4.tar.gz
-cd xl2tpd-1.2.4
+
+cd $cur_dir
+wget  http://cloud.github.com/downloads/shenrui01/vps/xl2tpd-1.2.8.tar
+tar zxvf xl2tpd-1.2.8.tar
+cd xl2tpd-1.2.8
 make install
-mkdir /etc/xl2tpd
-rm -rf /etc/xl2tpd/xl2tpd.conf
+cd ..
+
+mkdir -p /etc/xl2tpd
 touch /etc/xl2tpd/xl2tpd.conf
-cat >>/etc/xl2tpd/xl2tpd.conf<<EOF
+cat >> /etc/xl2tpd/xl2tpd.conf <<EOF
 [global]
 ipsec saref = yes
+
 [lns default]
-ip range = $iprange.2-$iprange.254
-local ip = $iprange.1
+ip range = 10.85.91.10-10.85.91.254
+local ip = 10.85.91.1
 refuse chap = yes
 refuse pap = yes
 require authentication = yes
@@ -143,9 +153,9 @@ ppp debug = yes
 pppoptfile = /etc/ppp/options.xl2tpd
 length bit = yes
 EOF
-rm -rf /etc/ppp/options.xl2tpd
+
 touch /etc/ppp/options.xl2tpd
-cat >>/etc/ppp/options.xl2tpd<<EOF
+cat >> /etc/ppp/options.xl2tpd <<EOF
 require-mschap-v2
 ms-dns 8.8.8.8
 ms-dns 8.8.4.4
@@ -161,55 +171,43 @@ proxyarp
 lcp-echo-interval 30
 lcp-echo-failure 4
 EOF
-cat >>/etc/ppp/chap-secrets<<EOF
-test l2tpd test123 *
-test pptpd test123 *
-EOF
-touch /usr/bin/zl2tpset
-echo "#/bin/bash" >>/usr/bin/zl2tpset
-echo "for each in /proc/sys/net/ipv4/conf/*" >>/usr/bin/zl2tpset
-echo "do" >>/usr/bin/zl2tpset
-echo "echo 0 > \$each/accept_redirects" >>/usr/bin/zl2tpset
-echo "echo 0 > \$each/send_redirects" >>/usr/bin/zl2tpset
-echo "done" >>/usr/bin/zl2tpset
-chmod +x /usr/bin/zl2tpset
- 
-wget https://raw.github.com/shenrui01/vps/master/pptpd-1.3.4-2.fc16.i686.rpm
-rpm -ivh pptpd-*.i686.rpm
-rm -rf /etc/pptpd.conf
-touch /etc/pptpd.conf
-cat >>/etc/pptpd.conf<<EOF 
-localip $pprange.1
-remoteip $pprange.2-254
-option /etc/ppp/options.pptpd
-debug
-stimeout 30
-EOF
-iptables --table nat --append POSTROUTING --jump MASQUERADE
-zl2tpset
-xl2tpd
-cat >>/etc/rc.local<<EOF
-iptables --table nat --append POSTROUTING --jump MASQUERADE
+
+mknod /dev/ppp c 108 0 
+echo "localip 10.85.92.1" >> /etc/pptpd.conf
+echo "remoteip 10.85.92.10-254" >> /etc/pptpd.conf
+echo "ms-dns 8.8.8.8" >> /etc/ppp/options.pptpd
+echo "ms-dns 8.8.4.4" >> /etc/ppp/options.pptpd
+
+chkconfig pptpd on
+service pptpd restart
+
+echo "$username l2tpd $userpsw *" >> /etc/ppp/chap-secrets
+echo "$username pptpd $userpsw *" >> /etc/ppp/chap-secrets
+/usr/local/sbin/xl2tpd
+
+cat >> /etc/rc.local <<EOF
+mknod /dev/ppp c 108 0
+for each in /proc/sys/net/ipv4/conf/*
+do
+        echo 0 > \$each/accept_redirects
+        echo 0 > \$each/send_redirects
+done
+echo 1 > /proc/sys/net/core/xfrm_larval_drop
 /etc/init.d/ipsec restart
-/usr/bin/zl2tpset
 /usr/local/sbin/xl2tpd
 EOF
+
 clear
+
 ipsec verify
+
 printf "
-####################################################
-#                                                  #
-# This is a Shell-Based tool of l2tp&pptp install  #
-# Website: http://rsis.me                          #
-# Based on zeddicus.com's l2tp script              #
-####################################################
 if there are no [FAILED] above, then you can
-connect to your VPN Server with the default
+connect to your L2TP&PPTP VPN Server with the default
 user/pass below:
- 
-ServerIP:$vpsip
-username:test
-password:test123
-PSK:$mypsk
- 
+
+ServerIP:$host_ip
+username:$username
+password:$userpsw
+PSK:$psk (for L2TP VPN)
 "
